@@ -72,6 +72,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .panel{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px 4px 12px;text-align:center}
 .lead{margin:0;color:var(--muted);font-size:14px}
 .start{font:inherit;font-weight:700;font-size:17px;padding:14px 28px;min-width:220px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);cursor:pointer;touch-action:manipulation}
+.count{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500}
+.count select{font:inherit;font-size:15px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);cursor:pointer}
+.count select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .progress{display:flex;align-items:center;gap:10px;font-family:var(--f-num);font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
 .bar{flex:1;height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
 .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
@@ -126,6 +129,11 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   <div class="card">
     <div class="panel" id="intro">
       <p class="lead" id="introLead"></p>
+      <label class="count" for="qcount">問題数
+        <select id="qcount">
+          <option value="10">10問</option><option value="20">20問</option><option value="30">30問</option><option value="40">40問</option><option value="50">50問</option>
+        </select>
+      </label>
       <button class="start" id="start">スタート（10問）</button>
       <p class="hint">Enterキーでも始められます</p>
     </div>
@@ -139,7 +147,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
       <p class="hint" id="hint"></p>
     </div>
     <div class="panel" id="result" hidden>
-      <div class="score"><b id="r-score">0</b><span>/ 10 正解</span></div>
+      <div class="score"><b id="r-score">0</b><span id="r-total">/ 10 正解</span></div>
       <p class="lead" id="r-meta"></p>
       <ol class="r-list" id="r-list"></ol>
       <button class="start" id="again">もう一度（10問）</button>
@@ -332,7 +340,15 @@ function renderAnswers(){
 }
 const btnFor=v=>document.getElementById((st.mode===4?"p":"k")+v);
 
-const ROUND=10, GOALMS={1:1000,2:2000,3:3000,4:3000}, MODENAME={1:"単音",2:"2音",3:"和音",4:"コード"};
+let ROUND=10;
+function setRound(n){
+  ROUND=[10,20,30,40,50].includes(n)?n:10;
+  document.getElementById("qcount").value=String(ROUND);
+  document.getElementById("start").textContent=`スタート（${ROUND}問）`;
+  document.getElementById("again").textContent=`もう一度（${ROUND}問）`;
+  try{localStorage.setItem("fuyomi-round",String(ROUND))}catch(e){}
+}
+const GOALMS={1:1000,2:2000,3:3000,4:3000}, MODENAME={1:"単音",2:"2音",3:"和音",4:"コード"};
 function show(id){["intro","play","result"].forEach(x=>document.getElementById(x).hidden=x!==id)}
 function settingText(){
   const s=[MODENAME[st.mode]];
@@ -358,6 +374,7 @@ function showResult(){
   const goal=GOALMS[st.mode], fast=st.log.filter(r=>r.ok&&r.ms<=goal).length;
   const slow=Math.max(...st.log.map(r=>r.ms));
   document.getElementById("r-score").textContent=st.ok;
+  document.getElementById("r-total").textContent=`/ ${st.n} 正解`;
   document.getElementById("r-meta").textContent=`平均 ${(st.sum/st.n/1000).toFixed(2)}秒・目標${goal/1000}秒以内で正解 ${fast}問`;
   document.getElementById("r-list").innerHTML=st.log.map(r=>
     `<li class="${r.ok?"":"x"} ${r.ms===slow?"slow":""}"><b class="m">${r.ok?"○":"×"}</b><span>${r.msg}</span><em>${(r.ms/1000).toFixed(2)}秒</em></li>`).join("");
@@ -457,10 +474,12 @@ document.querySelectorAll("[data-name]").forEach(b=>b.onclick=()=>{
   const sel=[...st.sel]; renderAnswers(); sel.forEach(v=>btnFor(v).classList.add("sel")); weak();
 });
 document.getElementById("reset").onclick=()=>{rec={};save();weak()};
+document.getElementById("qcount").onchange=e=>setRound(+e.target.value);
+try{setRound(+(localStorage.getItem("fuyomi-round")||10))}catch(e){setRound(10)}
 document.getElementById("start").onclick=startRound;
 document.getElementById("again").onclick=startRound;
 document.addEventListener("keydown",e=>{
-  if(e.key==="Enter"&&!st.running&&!e.target.closest("button")){e.preventDefault();startRound();return}
+  if(e.key==="Enter"&&!st.running&&!e.target.closest("button,select")){e.preventDefault();startRound();return}
   if(st.mode===4||e.key.length!==1) return;
   const i="cdefgab".indexOf(e.key.toLowerCase()); if(i>=0) tap(i,btnFor(i));
 });
