@@ -68,6 +68,24 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .weak li span{display:block}
 .weak li em{font-style:normal;font-family:var(--f-num);color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .weak p{margin:0;color:var(--muted);font-size:13px}
+#play{display:flex;flex-direction:column;gap:10px}
+.panel{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px 4px 12px;text-align:center}
+.lead{margin:0;color:var(--muted);font-size:14px}
+.start{font:inherit;font-weight:700;font-size:17px;padding:14px 28px;min-width:220px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);cursor:pointer;touch-action:manipulation}
+.progress{display:flex;align-items:center;gap:10px;font-family:var(--f-num);font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.bar{flex:1;height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.score{display:flex;align-items:baseline;gap:6px}
+.score b{font-family:var(--f-num);font-size:52px;line-height:1;font-variant-numeric:tabular-nums}
+.score span{color:var(--muted);font-size:15px}
+.r-list{list-style:none;margin:0;padding:0;width:100%;text-align:left;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.r-list li{display:grid;grid-template-columns:1.3em 1fr auto;gap:6px;align-items:baseline;padding:6px 8px;border-radius:8px;background:var(--bg)}
+.r-list li span{min-width:0}
+.r-list .m{color:var(--ok);font-weight:700}
+.r-list li.x .m{color:var(--ng)}
+.r-list em{font-style:normal;font-family:var(--f-num);color:var(--muted);font-variant-numeric:tabular-nums}
+.r-list li.slow em{color:var(--ng)}
+@media (prefers-reduced-motion: reduce){.bar i{transition:none}}
 .foot{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--muted);font-size:12px}
 .foot button{font:inherit;font-size:12px;background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:4px 10px;cursor:pointer}
 </style>
@@ -106,12 +124,26 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   </div>
 
   <div class="card">
-    <svg id="staff" viewBox="0 0 320 140" role="img" aria-label="出題中の音符"></svg>
-    <div class="sym" id="sym" hidden></div>
-    <div class="feedback" id="fb"></div>
-    <div class="keys" id="keys"></div>
-    <div class="piano" id="piano" hidden></div>
-    <p class="hint" id="hint"></p>
+    <div class="panel" id="intro">
+      <p class="lead" id="introLead"></p>
+      <button class="start" id="start">スタート（10問）</button>
+      <p class="hint">Enterキーでも始められます</p>
+    </div>
+    <div id="play" hidden>
+      <div class="progress"><span id="prog">1 / 10</span><div class="bar"><i id="bar"></i></div></div>
+      <svg id="staff" viewBox="0 0 320 140" role="img" aria-label="出題中の音符"></svg>
+      <div class="sym" id="sym" hidden></div>
+      <div class="feedback" id="fb"></div>
+      <div class="keys" id="keys"></div>
+      <div class="piano" id="piano" hidden></div>
+      <p class="hint" id="hint"></p>
+    </div>
+    <div class="panel" id="result" hidden>
+      <div class="score"><b id="r-score">0</b><span>/ 10 正解</span></div>
+      <p class="lead" id="r-meta"></p>
+      <ol class="r-list" id="r-list"></ol>
+      <button class="start" id="again">もう一度（10問）</button>
+    </div>
   </div>
 
   <div class="stats">
@@ -146,7 +178,7 @@ const KS={6:-1,2:-1,5:-1}; // 調号 B♭ E♭ A♭
 const KSPOS={treble:[4,7,3],bass:[2,5,1]};
 const GOAL={1:"目標：1秒以内",2:"目標：2秒以内",3:"目標：3秒以内",4:"目標：3秒以内"};
 
-const st={mode:1,clef:"treble",range:"ledger",name:"jp",ct:"all",hard:false,q:null,t0:0,missed:false,busy:false,sel:new Set(),need:new Set(),n:0,ok:0,sum:0};
+const st={mode:1,clef:"treble",range:"ledger",name:"jp",ct:"all",hard:false,running:false,rid:0,log:[],q:null,t0:0,missed:false,busy:false,sel:new Set(),need:new Set(),n:0,ok:0,sum:0};
 let rec={};
 try{rec=JSON.parse(localStorage.getItem("fuyomi-rec")||"{}")}catch(e){rec={}}
 function save(){try{localStorage.setItem("fuyomi-rec",JSON.stringify(rec))}catch(e){}}
@@ -300,9 +332,43 @@ function renderAnswers(){
 }
 const btnFor=v=>document.getElementById((st.mode===4?"p":"k")+v);
 
+const ROUND=10, GOALMS={1:1000,2:2000,3:3000,4:3000}, MODENAME={1:"単音",2:"2音",3:"和音",4:"コード"};
+function show(id){["intro","play","result"].forEach(x=>document.getElementById(x).hidden=x!==id)}
+function settingText(){
+  const s=[MODENAME[st.mode]];
+  if(st.mode===4) s.push({3:"三和音",4:"セブンス",all:"三和音＋セブンス"}[st.ct]);
+  else{
+    s.push({treble:"ト音",bass:"ヘ音",both:"ト音・ヘ音"}[st.clef], st.range==="in"?"五線内":"加線あり");
+    if(st.mode===3&&st.hard) s.push("難しい和音あり");
+  }
+  return s.join("・");
+}
+function showIntro(){
+  st.running=false; st.busy=true; st.q=null; st.rid++;
+  document.getElementById("introLead").textContent=settingText();
+  show("intro");
+}
+function startRound(){
+  st.n=st.ok=st.sum=0; st.log=[]; stats(null);
+  st.running=true; st.rid++;
+  show("play"); next();
+}
+function showResult(){
+  st.running=false; st.busy=true; st.q=null;
+  const goal=GOALMS[st.mode], fast=st.log.filter(r=>r.ok&&r.ms<=goal).length;
+  const slow=Math.max(...st.log.map(r=>r.ms));
+  document.getElementById("r-score").textContent=st.ok;
+  document.getElementById("r-meta").textContent=`平均 ${(st.sum/st.n/1000).toFixed(2)}秒・目標${goal/1000}秒以内で正解 ${fast}問`;
+  document.getElementById("r-list").innerHTML=st.log.map(r=>
+    `<li class="${r.ok?"":"x"} ${r.ms===slow?"slow":""}"><b class="m">${r.ok?"○":"×"}</b><span>${r.msg}</span><em>${(r.ms/1000).toFixed(2)}秒</em></li>`).join("");
+  show("result");
+}
+
 function next(){
   st.q=pick(); st.missed=false; st.busy=false; st.sel=new Set();
   const q=st.q;
+  document.getElementById("prog").textContent=`${st.n+1} / ${ROUND}`;
+  document.getElementById("bar").style.width=`${st.n/ROUND*100}%`;
   document.getElementById("staff").hidden=q.mode===4;
   document.getElementById("sym").hidden=q.mode!==4;
   if(q.mode===4){document.getElementById("sym").textContent=sym(q.ri,q.type); st.need=new Set(spell(q.ri,q.type).map(t=>t.pc))}
@@ -313,7 +379,7 @@ function next(){
 }
 
 function tap(v,btn){
-  if(st.busy||!st.q) return;
+  if(!st.running||st.busy||!st.q) return;
   if(st.mode===1) return single(v,btn);
   if(st.sel.has(v)){st.sel.delete(v);btn.classList.remove("sel");return}
   st.sel.add(v); btn.classList.add("sel");
@@ -345,8 +411,10 @@ function finish(ok,msg){
   st.n++; if(ok) st.ok++; st.sum+=ms;
   const fb=document.getElementById("fb"); fb.className="feedback "+(ok?"ok":"ng");
   fb.textContent=`${msg}　${(ms/1000).toFixed(2)}秒`;
-  stats(ms); weak();
-  setTimeout(next,ok?(st.mode===1?450:700):1900);
+  st.log.push({msg,ok,ms}); stats(ms); weak();
+  document.getElementById("bar").style.width=`${st.n/ROUND*100}%`;
+  const rid=st.rid;
+  setTimeout(()=>{if(!st.running||rid!==st.rid) return; st.n>=ROUND?showResult():next()},ok?(st.mode===1?450:700):1900);
 }
 
 function stats(ms){
@@ -371,25 +439,28 @@ function setMode(m){
   document.getElementById("shapeOpts").hidden=m!==3;
   document.getElementById("hint").textContent=(m===3&&st.hard)?HINT3H:HINT[m];
   document.getElementById("goal").textContent=GOAL[m];
-  renderAnswers(); weak(); next();
+  renderAnswers(); weak(); showIntro();
 }
 document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>setMode(+b.dataset.mode));
-document.querySelectorAll("[data-clef]").forEach(b=>b.onclick=()=>{st.clef=b.dataset.clef;setGroup("clef",st.clef);next()});
-document.querySelectorAll("[data-range]").forEach(b=>b.onclick=()=>{st.range=b.dataset.range;setGroup("range",st.range);next()});
+document.querySelectorAll("[data-clef]").forEach(b=>b.onclick=()=>{st.clef=b.dataset.clef;setGroup("clef",st.clef);showIntro()});
+document.querySelectorAll("[data-range]").forEach(b=>b.onclick=()=>{st.range=b.dataset.range;setGroup("range",st.range);showIntro()});
 document.querySelectorAll("[data-hard]").forEach(b=>b.onclick=()=>{
   st.hard=b.dataset.hard==="1"; setGroup("hard",b.dataset.hard);
   document.getElementById("hint").textContent=st.hard?HINT3H:HINT[3];
   try{localStorage.setItem("fuyomi-hard",st.hard?"1":"0")}catch(e){}
-  st.q=null; weak(); next();
+  weak(); showIntro();
 });
 try{if(localStorage.getItem("fuyomi-hard")==="1"){st.hard=true;setGroup("hard","1")}}catch(e){}
-document.querySelectorAll("[data-ct]").forEach(b=>b.onclick=()=>{st.ct=b.dataset.ct;setGroup("ct",st.ct);next()});
+document.querySelectorAll("[data-ct]").forEach(b=>b.onclick=()=>{st.ct=b.dataset.ct;setGroup("ct",st.ct);showIntro()});
 document.querySelectorAll("[data-name]").forEach(b=>b.onclick=()=>{
   st.name=b.dataset.name;setGroup("name",st.name);
   const sel=[...st.sel]; renderAnswers(); sel.forEach(v=>btnFor(v).classList.add("sel")); weak();
 });
-document.getElementById("reset").onclick=()=>{rec={};save();st.n=st.ok=st.sum=0;stats(null);weak()};
+document.getElementById("reset").onclick=()=>{rec={};save();weak()};
+document.getElementById("start").onclick=startRound;
+document.getElementById("again").onclick=startRound;
 document.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&!st.running&&!e.target.closest("button")){e.preventDefault();startRound();return}
   if(st.mode===4||e.key.length!==1) return;
   const i="cdefgab".indexOf(e.key.toLowerCase()); if(i>=0) tap(i,btnFor(i));
 });
