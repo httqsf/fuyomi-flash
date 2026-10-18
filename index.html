@@ -69,6 +69,11 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .weak li em{font-style:normal;font-family:var(--f-num);color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .weak p{margin:0;color:var(--muted);font-size:13px}
 #play{display:flex;flex-direction:column;gap:10px}
+.names{display:flex;flex-direction:column;gap:10px}
+.names .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.names button{font-family:var(--f-num);font-weight:500;font-size:14px;padding:12px 0;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;touch-action:manipulation;white-space:nowrap}
+.names button.ok{background:var(--ok);color:var(--surface);border-color:var(--ok)}
+.names button.ng{background:var(--ng);color:var(--surface);border-color:var(--ng)}
 .panel{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px 4px 12px;text-align:center}
 .lead{margin:0;color:var(--muted);font-size:14px}
 .start{font:inherit;font-weight:700;font-size:17px;padding:14px 28px;min-width:220px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);cursor:pointer;touch-action:manipulation}
@@ -116,10 +121,19 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     <button id="h-0" data-hard="0" aria-pressed="true">基本形のみ</button>
     <button id="h-1" data-hard="1" aria-pressed="false">＋難しい和音</button>
   </div>
+  <div id="cdirOpts" class="seg" role="group" aria-label="出題の向き" hidden>
+    <button id="d-n" data-cdir="n" aria-pressed="true">名前→音</button>
+    <button id="d-s" data-cdir="s" aria-pressed="false">譜面→名前</button>
+  </div>
+  <div id="invOpts" class="seg" role="group" aria-label="転回形" hidden>
+    <button id="v-0" data-inv="0" aria-pressed="false">基本形のみ</button>
+    <button id="v-1" data-inv="1" aria-pressed="true">転回形も</button>
+  </div>
   <div id="chordOpts" class="seg" role="group" aria-label="コードの種類" hidden>
+    <button id="t-m" data-ct="mm" aria-pressed="true">メジャー・マイナー</button>
     <button id="t-3" data-ct="3" aria-pressed="false">三和音</button>
     <button id="t-4" data-ct="4" aria-pressed="false">セブンス</button>
-    <button id="t-a" data-ct="all" aria-pressed="true">全部</button>
+    <button id="t-a" data-ct="all" aria-pressed="false">全部</button>
   </div>
   <div class="seg" role="group" aria-label="表記">
     <button id="n-jp" data-name="jp" aria-pressed="true">ドレミ</button>
@@ -144,6 +158,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
       <div class="feedback" id="fb"></div>
       <div class="keys" id="keys"></div>
       <div class="piano" id="piano" hidden></div>
+      <div class="names" id="names" hidden></div>
       <p class="hint" id="hint"></p>
     </div>
     <div class="panel" id="result" hidden>
@@ -178,6 +193,10 @@ const TYPES={"":[0,4,7],"m":[0,3,7],"dim":[0,3,6],"7":[0,4,7,10],"M7":[0,4,7,11]
 const DEG={0:"1",3:"♭3",4:"3",6:"♭5",7:"5",10:"♭7",11:"7"};
 const ROOTS=[[0,0],[1,-1],[1,0],[2,-1],[2,0],[3,0],[3,1],[4,0],[5,-1],[5,0],[6,-1],[6,0]];
 const HINT={1:"音名をタップ（キーボードは C D E F G A B）",2:"2つの音名をタップ。そろった時点で判定",3:"和音の音名をすべてタップ。そろった時点で判定",4:"コードの構成音を鍵盤でタップ"};
+const HINT4S="和音の形を見て、コード名をタップ";
+// マイナー系は C♯m・G♯m のように♯で書く（D♭m・A♭m だと F♭・C♭ が出るため）
+const MINOR_ALT={1:[0,1],8:[4,1]};
+const rootOf=(ri,type)=>(/^(m|dim)/.test(type)&&MINOR_ALT[ri])||ROOTS[ri];
 const HINT3H="和音の音名をすべてタップ。♭・♮は答えなくてOK（正解表示で確認）";
 const INV=["基本形","第1転回形","第2転回形","第3転回形"];
 // E♭調（Cマイナー）の曲によく出るコード：[ROOTSの番号, 種類]
@@ -186,7 +205,7 @@ const KS={6:-1,2:-1,5:-1}; // 調号 B♭ E♭ A♭
 const KSPOS={treble:[4,7,3],bass:[2,5,1]};
 const GOAL={1:"目標：1秒以内",2:"目標：2秒以内",3:"目標：3秒以内",4:"目標：3秒以内"};
 
-const st={mode:1,clef:"treble",range:"ledger",name:"jp",ct:"all",hard:false,running:false,rid:0,log:[],q:null,t0:0,missed:false,busy:false,sel:new Set(),need:new Set(),n:0,ok:0,sum:0};
+const st={mode:1,clef:"treble",range:"ledger",name:"jp",ct:"mm",cdir:"n",inv:true,hard:false,running:false,rid:0,log:[],q:null,t0:0,missed:false,busy:false,sel:new Set(),need:new Set(),n:0,ok:0,sum:0};
 let rec={};
 try{rec=JSON.parse(localStorage.getItem("fuyomi-rec")||"{}")}catch(e){rec={}}
 function save(){try{localStorage.setItem("fuyomi-rec",JSON.stringify(rec))}catch(e){}}
@@ -203,10 +222,10 @@ function where(s){
   return s%2===0?`上${(s-8)/2}本目の加線`:(s===9?"第5線の上":`上${(s-9)/2}本目の加線の上`);
 }
 function spell(ri,type){
-  const [l,a]=ROOTS[ri], rp=LPC[l]+a;
+  const [l,a]=rootOf(ri,type), rp=LPC[l]+a;
   return TYPES[type].map((semi,i)=>{const L=(l+2*i)%7; let d=mod(rp+semi-LPC[L],12); if(d>6)d-=12; return {l:L,a:d,pc:mod(rp+semi,12),semi}});
 }
-const sym=(ri,type)=>EN[ROOTS[ri][0]]+accS(ROOTS[ri][1])+type;
+const sym=(ri,type)=>{const [l,a]=rootOf(ri,type); return EN[l]+accS(a)+type};
 function whiteType(l,n){
   const semis=[0,2,4,6].slice(0,n).map(x=>mod(LPC[(l+x)%7]-LPC[l],12));
   return Object.keys(TYPES).find(t=>TYPES[t].join()===semis.join());
@@ -219,11 +238,13 @@ function parse(k){
   if(p[0]==="c"){const s=+p[2],n=+p[3];return {k,mode:3,fam:"c",clef:p[1],ss:Array.from({length:n},(_,i)=>s+2*i)}}
   if(p[0]==="v") return {k,mode:3,fam:"v",clef:p[1],l:+p[2],n:+p[3],inv:+p[4]};
   if(p[0]==="h") return {k,mode:3,fam:"h",clef:p[1],ci:+p[2],inv:+p[3],omit:p[4]==="1"};
-  if(p[0]==="k") return {k,mode:4,ri:+p[1],type:p.slice(2).join(":")};
+  if(p[0]==="k") return {k,mode:4,dir:"n",ri:+p[1],type:p.slice(2).join(":")};
+  if(p[0]==="s") return {k,mode:4,dir:"s",fam:"s",clef:p[1],ri:+p[2],type:p[3],inv:+p[4]};
   return {k,mode:1,clef:p[0],ss:[+p[1]]};
 }
 function label(k){
   const q=parse(k);
+  if(q.dir==="s") return `${CLEF[q.clef].label} ${sym(q.ri,q.type)} ${INV[q.inv]}`;
   if(q.mode===4) return `${sym(q.ri,q.type)}（${spell(q.ri,q.type).map(t=>nm(t.l,t.a)).join("・")}）`;
   if(q.fam==="v") return `${CLEF[q.clef].label} ${EN[q.l]+whiteType(q.l,q.n)} ${INV[q.inv]}`;
   if(q.fam==="h"){const [ri,t]=HC[q.ci]; return `${CLEF[q.clef].label} ${sym(ri,t)} ${INV[q.inv]}${q.omit?"・5度省略":""}（E♭調）`}
@@ -235,8 +256,13 @@ function label(k){
 
 function pool(){
   const out=[];
+  if(st.mode===4&&st.cdir==="s"){
+    const clefs=st.clef==="both"?["treble","bass"]:[st.clef];
+    for(const c of clefs) for(let r=0;r<12;r++) for(const t of ["","m"]) for(const i of (st.inv?[0,1,2]:[0])) out.push(`s:${c}:${r}:${t}:${i}`);
+    return out;
+  }
   if(st.mode===4){
-    const types=Object.keys(TYPES).filter(t=>st.ct==="all"||TYPES[t].length===+st.ct);
+    const types=Object.keys(TYPES).filter(t=>st.ct==="all"||(st.ct==="mm"?(t===""||t==="m"):TYPES[t].length===+st.ct));
     for(let r=0;r<12;r++) for(const t of types) if(spell(r,t).every(x=>Math.abs(x.a)<2)) out.push(`k:${r}:${t}`);
     return out;
   }
@@ -259,10 +285,11 @@ function pool(){
 }
 // 和音の配置：転回・省略して密集で積み、五線内に収まる最低音をランダムに選ぶ
 function build(q){
-  if(q.mode===4) return q;
-  if(q.fam!=="v"&&q.fam!=="h"){q.notes=q.ss.map(s=>({s,l:letterOf(q.clef,s),a:0}));return q}
+  if(q.mode===4&&q.dir!=="s") return q;
+  if(q.fam!=="v"&&q.fam!=="h"&&q.fam!=="s"){q.notes=q.ss.map(s=>({s,l:letterOf(q.clef,s),a:0}));return q}
   let tones;
   if(q.fam==="v") tones=[0,2,4,6].slice(0,q.n).map(x=>({l:(q.l+x)%7,a:0}));
+  else if(q.fam==="s") tones=spell(q.ri,q.type).map(x=>({l:x.l,a:x.a}));
   else{const [ri,t]=HC[q.ci]; tones=spell(ri,t).map(x=>({l:x.l,a:x.a})); q.ks=true}
   let t=tones.slice(q.inv).concat(tones.slice(0,q.inv));
   if(q.omit) t=t.filter(x=>x!==tones[2]);
@@ -315,12 +342,15 @@ function draw(q){
     xs[s]=x; prev=s;
     g+=`<ellipse cx="${x}" cy="${y(s)}" rx="9" ry="6.3" transform="rotate(-20 ${x} ${y(s)})" fill="var(--staff)"/>`;
   }
-  // 臨時記号：上から順に置き、近い音どうしは列をずらす
-  const leftmost=Math.min(...Object.values(xs)), notes=(q.notes||[]).slice().sort((a,b)=>b.s-a.s);
-  let lastS=null, col=0;
-  for(const n of notes){
-    const gl=accGlyph(n,q.ks); if(!gl) continue;
-    col=(lastS!==null&&lastS-n.s<6)?col+1:0; lastS=n.s;
+  // 臨時記号：一番上→一番下→内側の順に、6度未満で重なる記号とは列を分けて左へずらす
+  const leftmost=Math.min(...Object.values(xs));
+  const acc=(q.notes||[]).filter(n=>accGlyph(n,q.ks)).sort((a,b)=>b.s-a.s), order2=[];
+  for(let i=0,j=acc.length-1;i<=j;i++,j--){order2.push(acc[i]); if(i!==j) order2.push(acc[j])}
+  const placed=[];
+  for(const n of order2){
+    const gl=accGlyph(n,q.ks);
+    let col=0; while(placed.some(p=>p.col===col&&Math.abs(p.s-n.s)<6)) col++;
+    placed.push({s:n.s,col});
     const ax=leftmost-21-col*13, ay=gl==="♭"?y(n.s)-4:y(n.s);
     g+=`<text x="${ax}" y="${ay}" font-size="25" font-family="var(--f-music)" fill="var(--staff)" dominant-baseline="central" text-anchor="middle">${gl}</text>`;
   }
@@ -328,8 +358,11 @@ function draw(q){
 }
 
 function renderAnswers(){
-  const keys=document.getElementById("keys"), piano=document.getElementById("piano");
-  keys.hidden=st.mode===4; piano.hidden=st.mode!==4;
+  const keys=document.getElementById("keys"), piano=document.getElementById("piano"), nms=document.getElementById("names");
+  keys.hidden=st.mode===4; piano.hidden=!(st.mode===4&&st.cdir==="n"); nms.hidden=!(st.mode===4&&st.cdir==="s");
+  nms.innerHTML=["","m"].map(t=>`<div class="grid">${[...Array(12).keys()].map(r=>
+    `<button id="${cid(r,t)}" data-v="${r}:${t}">${sym(r,t)}</button>`).join("")}</div>`).join("");
+  nms.querySelectorAll("button").forEach(b=>b.onclick=()=>choose(b.dataset.v,b));
   keys.innerHTML=names().map((n,i)=>`<button id="k${i}" data-v="${i}">${n}</button>`).join("");
   keys.querySelectorAll("button").forEach(b=>b.onclick=()=>tap(+b.dataset.v,b));
   let h="";
@@ -339,6 +372,7 @@ function renderAnswers(){
   piano.querySelectorAll("button").forEach(b=>b.onclick=()=>tap(+b.dataset.v,b));
 }
 const btnFor=v=>document.getElementById((st.mode===4?"p":"k")+v);
+function cid(r,t){return `nm${r}${t||"M"}`}
 
 let ROUND=10;
 function setRound(n){
@@ -352,7 +386,8 @@ const GOALMS={1:1000,2:2000,3:3000,4:3000}, MODENAME={1:"単音",2:"2音",3:"和
 function show(id){["intro","play","result"].forEach(x=>document.getElementById(x).hidden=x!==id)}
 function settingText(){
   const s=[MODENAME[st.mode]];
-  if(st.mode===4) s.push({3:"三和音",4:"セブンス",all:"三和音＋セブンス"}[st.ct]);
+  if(st.mode===4&&st.cdir==="s") s.push("譜面→名前",{treble:"ト音",bass:"ヘ音",both:"ト音・ヘ音"}[st.clef], st.range==="in"?"五線内":"加線あり", st.inv?"転回形あり":"基本形のみ");
+  else if(st.mode===4) s.push("名前→音",{mm:"メジャー・マイナー",3:"三和音",4:"セブンス",all:"三和音＋セブンス"}[st.ct]);
   else{
     s.push({treble:"ト音",bass:"ヘ音",both:"ト音・ヘ音"}[st.clef], st.range==="in"?"五線内":"加線あり");
     if(st.mode===3&&st.hard) s.push("難しい和音あり");
@@ -386,11 +421,13 @@ function next(){
   const q=st.q;
   document.getElementById("prog").textContent=`${st.n+1} / ${ROUND}`;
   document.getElementById("bar").style.width=`${st.n/ROUND*100}%`;
-  document.getElementById("staff").hidden=q.mode===4;
-  document.getElementById("sym").hidden=q.mode!==4;
-  if(q.mode===4){document.getElementById("sym").textContent=sym(q.ri,q.type); st.need=new Set(spell(q.ri,q.type).map(t=>t.pc))}
+  const onStaff=q.mode!==4||q.dir==="s";
+  document.getElementById("staff").hidden=!onStaff;
+  document.getElementById("sym").hidden=onStaff;
+  if(q.dir==="s"){draw(q); st.need=new Set([`${q.ri}:${q.type}`])}
+  else if(q.mode===4){document.getElementById("sym").textContent=sym(q.ri,q.type); st.need=new Set(spell(q.ri,q.type).map(t=>t.pc))}
   else{draw(q); st.need=new Set(q.notes.map(n=>n.l))}
-  document.querySelectorAll(".keys button,.piano button").forEach(b=>b.classList.remove("sel","ok","ng","miss"));
+  document.querySelectorAll(".keys button,.piano button,.names button").forEach(b=>b.classList.remove("sel","ok","ng","miss"));
   const fb=document.getElementById("fb"); fb.className="feedback"; fb.textContent="";
   st.t0=performance.now();
 }
@@ -401,6 +438,15 @@ function tap(v,btn){
   if(st.sel.has(v)){st.sel.delete(v);btn.classList.remove("sel");return}
   st.sel.add(v); btn.classList.add("sel");
   if(st.sel.size===st.need.size) judge();
+}
+function choose(v,btn){
+  if(!st.running||st.busy||!st.q) return;
+  const q=st.q, ok=st.need.has(v);
+  rec[q.k]=rec[q.k]||{n:0,miss:0,ms:0};
+  if(!ok){rec[q.k].miss++; btn.classList.add("ng")}
+  document.getElementById(cid(q.ri,q.type)).classList.add("ok");
+  const [r,t]=v.split(":");
+  finish(ok,`${sym(q.ri,q.type)} ${INV[q.inv]}　下から ${q.notes.map(n=>nm(n.l,n.a)).join("・")}${ok?"":`（選択：${sym(+r,t)}）`}`);
 }
 function single(v,btn){
   const q=st.q, correct=[...st.need][0], fb=document.getElementById("fb");
@@ -441,7 +487,8 @@ function stats(ms){
   document.getElementById("s-last").textContent=ms!=null?(ms/1000).toFixed(2):"–";
 }
 function weak(){
-  const mine=Object.entries(rec).filter(([k])=>parse(k).mode===st.mode);
+  const fam=k=>{const q=parse(k); return q.mode===4?"4"+q.dir:String(q.mode)}, cur=st.mode===4?"4"+st.cdir:String(st.mode);
+  const mine=Object.entries(rec).filter(([k])=>fam(k)===cur);
   const total=mine.reduce((a,[,r])=>a+r.n,0), el=document.getElementById("weak");
   const list=mine.filter(([,r])=>r.n>=2).map(([k,r])=>({k,avg:r.ms/r.n,err:r.miss/r.n,w:weight(k)})).sort((a,b)=>b.w-a.w).slice(0,5);
   if(total<10||!list.length){el.innerHTML="<p>このモードで10問ほど答えると表示されます。</p>";return}
@@ -451,13 +498,30 @@ function weak(){
 function setGroup(attr,val){document.querySelectorAll(`[data-${attr}]`).forEach(b=>b.setAttribute("aria-pressed",b.dataset[attr]===String(val)))}
 function setMode(m){
   st.mode=m; setGroup("mode",m); st.n=st.ok=st.sum=0; st.q=null; stats(null);
-  document.getElementById("staffOpts").hidden=m===4;
-  document.getElementById("chordOpts").hidden=m!==4;
-  document.getElementById("shapeOpts").hidden=m!==3;
-  document.getElementById("hint").textContent=(m===3&&st.hard)?HINT3H:HINT[m];
   document.getElementById("goal").textContent=GOAL[m];
-  renderAnswers(); weak(); showIntro();
+  updateOpts(); renderAnswers(); weak(); showIntro();
 }
+function updateOpts(){
+  const m=st.mode, s=m===4&&st.cdir==="s";
+  document.getElementById("staffOpts").hidden=m===4&&!s;
+  document.getElementById("chordOpts").hidden=!(m===4&&!s);
+  document.getElementById("cdirOpts").hidden=m!==4;
+  document.getElementById("invOpts").hidden=!s;
+  document.getElementById("shapeOpts").hidden=m!==3;
+  document.getElementById("hint").textContent=s?HINT4S:(m===3&&st.hard)?HINT3H:HINT[m];
+}
+function savePref(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+document.querySelectorAll("[data-cdir]").forEach(b=>b.onclick=()=>{
+  st.cdir=b.dataset.cdir; setGroup("cdir",st.cdir); savePref("fuyomi-cdir",st.cdir);
+  updateOpts(); renderAnswers(); weak(); showIntro();
+});
+document.querySelectorAll("[data-inv]").forEach(b=>b.onclick=()=>{
+  st.inv=b.dataset.inv==="1"; setGroup("inv",b.dataset.inv); savePref("fuyomi-inv",b.dataset.inv); showIntro();
+});
+try{
+  const d=localStorage.getItem("fuyomi-cdir"); if(d==="s"||d==="n"){st.cdir=d;setGroup("cdir",d)}
+  const v=localStorage.getItem("fuyomi-inv"); if(v==="0"||v==="1"){st.inv=v==="1";setGroup("inv",v)}
+}catch(e){}
 document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>setMode(+b.dataset.mode));
 document.querySelectorAll("[data-clef]").forEach(b=>b.onclick=()=>{st.clef=b.dataset.clef;setGroup("clef",st.clef);showIntro()});
 document.querySelectorAll("[data-range]").forEach(b=>b.onclick=()=>{st.range=b.dataset.range;setGroup("range",st.range);showIntro()});
